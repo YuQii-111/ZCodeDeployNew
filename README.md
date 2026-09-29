@@ -148,33 +148,6 @@ https://github.com/zzooymc-source/ZCode-Deploy
 | 验证手段 | 人工翻模型请求日志 | `verify-patch.cjs` 真正执行补丁后的函数 |
 | 发布流程 | 手动打包 | `build-release.ps1` 白名单打包 + SHA256 清单 |
 
-## 发布到自己的仓库
-
-本目录已初始化为 git 仓库（分支 `main`），首次提交与推送：
-
-```bash
-# 1. 配一次 git 身份（本机尚未配置）
-git config user.name  "<你的名字>"
-git config user.email "<你的邮箱>"
-
-# 2. 首次提交
-git add .
-git commit -m "ZCode-Deploy v2.0.0: 修复 ZCode 更新后补丁失效 + 补齐发布流程"
-
-# 3. 接上你自己的远程地址并推送
-git remote add origin https://github.com/<你的用户名>/<仓库名>.git
-git push -u origin main
-```
-
-发布正式版本：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File build-release.ps1
-```
-
-然后把 `dist/ZCode-Deploy-v2.0.0.zip` 与 `.zip.sha256` 作为 GitHub Release 附件上传。
-`dist/`、`backups/`、`zcode-dir.txt` 已在 `.gitignore` 中排除，不会进仓库。
-
 ## 免责声明
 
 本工具仅用于修改本地安装的软件配置。请遵守 ZCode 服务条款，自行承担使用风险。

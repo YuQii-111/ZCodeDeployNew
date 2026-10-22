@@ -6,8 +6,24 @@
 // ============================================
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
-const target = process.argv[2] || 'D:\\app\\zcode\\resources\\glm\\zcode.cjs';
+function detectTarget() {
+    if (process.argv[2]) { return process.argv[2]; }
+    const cands = [];
+    if (process.env.ZCODE_DIR) {
+        cands.push(path.join(process.env.ZCODE_DIR, 'resources', 'glm', 'zcode.cjs'));          // Windows / 解包布局
+        cands.push(path.join(process.env.ZCODE_DIR, 'Contents', 'Resources', 'glm', 'zcode.cjs')); // macOS .app
+        cands.push(path.join(process.env.ZCODE_DIR, 'glm', 'zcode.cjs'));
+    }
+    cands.push('D:\\app\\zcode\\resources\\glm\\zcode.cjs');                                   // Windows 常规位置
+    cands.push('/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs');                    // macOS 常规位置
+    cands.push(path.join(os.homedir(), 'Applications', 'ZCode.app', 'Contents', 'Resources', 'glm', 'zcode.cjs'));
+    for (const c of cands) { if (fs.existsSync(c)) { return c; } }
+    return cands[0];
+}
+
+const target = detectTarget();
 const personaFile = path.join(__dirname, '人格.txt');
 
 let fail = 0;
@@ -120,13 +136,55 @@ for (const item of sections) {
     }
 }
 
+// ---- 4.5 沙箱执行辅助 ----
+// 补丁后的产物函数会引用包内其他顶层标识符（如 qf 计数器、模块级变量），
+// 单独提取执行时不在作用域。这里用 with 作用域兜底：
+//   - 已知覆盖值（如 CLI Prefix 的模块变量，补丁后为 ""）优先
+//   - 其余未知标识符给"可调用透传 stub"（调用返回首个参数，可链式取属性）
+//   - require 等真实参数比 with 作用域更内层，不受影响
+function makeStub() {
+    const f = function () {};
+    const p = new Proxy(f, {
+        get(t, k) {
+            if (k === Symbol.unscopables) { return undefined; }
+            if (k === Symbol.toPrimitive) { return () => ''; }
+            if (k === 'toString') { return () => ''; }
+            if (k === 'length') { return 0; }
+            if (k === 'slice') { return () => ''; }
+            return p;
+        },
+        apply(t, thisArg, args) { return args.length ? args[0] : p; },
+    });
+    return p;
+}
+function runWithScope(fnSrc, callSrc, named) {
+    const stub = makeStub();
+    // 真实 require 必须进命名表：产物函数声明在 with 块内，
+    // 其体内的自由变量先查 with 代理（has 恒真），再到外层参数就晚了
+    const scopeVal = Object.assign({ require: require }, named || {});
+    const scope = new Proxy(scopeVal, {
+        has() { return true; },
+        get(t, k) {
+            if (k === Symbol.unscopables) { return undefined; }
+            if (k in t) { return t[k]; }
+            return stub;
+        },
+    });
+    return new Function('require', '__s', 'with(__s){' + fnSrc + callSrc + '}')(require, scope);
+}
+
 // ---- 5. CLI Prefix 实际返回空串 ----
 const jmeName = findFnForLiteral('name:"CLI Prefix",source:"cli_prefix"');
 const jmeBody = jmeName ? extractFn(jmeName) : null;
 if (jmeBody) {
     try {
-        const section = new Function('wm', 'FVs', jmeBody + '; return ' + jmeName + '();')(() => 0, '');
-        check('CLI Prefix 片段内容为空 (' + jmeName + ')', section && section.content === '');
+        // 补丁 1 把模块级身份变量置 ""，从函数体首个赋值里发现变量名并注入该值
+        const varHit = jmeBody.match(/let\s+[A-Za-z_$][\w$]*\s*=\s*([A-Za-z_$][\w$]*)\s*;/);
+        const scopeVal = {};
+        if (varHit) { scopeVal[varHit[1]] = ''; }
+        const section = runWithScope(jmeBody, '; return ' + jmeName + '();', scopeVal);
+        check('CLI Prefix 片段内容为空 (' + jmeName + ')', section && section.content === '',
+              section ? JSON.stringify(section.content).slice(0, 40) : 'null');
     } catch (e) {
         check('CLI Prefix 片段内容为空', false, e.message);
     }
@@ -139,7 +197,7 @@ const idName = findFnForLiteral('name:"Agent Identity",source:"identity"');
 const idBody = idName ? extractFn(idName) : null;
 if (idBody) {
     try {
-        const section = new Function('require', 'wm', 'jVs', idBody + '; return ' + idName + '({});')(require, () => 0, () => 'FALLBACK');
+        const section = runWithScope(idBody, '; return ' + idName + '({});', {});
         check('Agent Identity 读到人格文件 (' + idName + ')', section && section.content === persona,
               section ? section.content.length + ' chars' : 'null');
     } catch (e) {

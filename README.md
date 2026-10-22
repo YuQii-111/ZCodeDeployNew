@@ -43,6 +43,28 @@ powershell -ExecutionPolicy Bypass -File deploy.ps1 status     # 查看状态
 powershell -ExecutionPolicy Bypass -File deploy.ps1 diag       # 注入点诊断
 ```
 
+## macOS
+
+`macos/` 目录提供完整 macOS 版（bash + perl，补丁引擎 1:1 移植自 deploy.ps1，
+同一份原版实测产物与 Windows 版**逐字节一致**）：
+
+```bash
+cd ZCode-Deploy/macos
+bash deploy.sh install          # 部署（备份 → 补丁 → 语法校验 → 重签名 → 重启）
+bash deploy.sh verify           # 诊断 + 功能级验证（需 node）
+```
+
+或双击 `macos/部署.command` 等启动器（git clone 的文件自带执行位）。
+
+macOS 特有处理：
+
+- 目标在 `.app` 包内（自动探测 `Contents/Resources/glm/zcode.cjs` 等三种布局）
+- 写入后自动 `codesign --force --deep --sign -` ad-hoc 重签名，
+  否则 Apple Silicon 上应用会被系统直接杀死（Killed: 9）
+- 首次部署若报 `Operation not permitted`：
+  `sudo chown -R "$(whoami)" /Applications/ZCode.app` +
+  系统设置 → 隐私与安全性 → **应用管理** → 允许「终端」
+
 ## 换人格
 
 直接编辑 `人格.txt`，保存，开新对话生效。不需要重启，不需要重跑部署。
@@ -124,8 +146,9 @@ System Context / Environment Info / Memory 等片段，所以一个补丁就清�
 查看状态.bat        查状态
 验证.bat            诊断 + 功能验证
 deploy.ps1          主脚本（install / restore / status / diag）
-verify-patch.cjs    功能验证器（真正执行补丁后的函数）
+verify-patch.cjs    功能验证器（真正执行补丁后的函数；跨平台路径探测 + 沙箱执行）
 人格.txt            人格文件（唯一编辑入口）
+macos/              macOS 完整版（deploy.sh / zcode-patch.pl / *.command / build-release.sh）
 backups             原版归档目录（保留最近 6 份，restore 失败时可手动挑）
 zcode-dir.txt       上次检测到的 ZCode 目录缓存
 修改记录.md         完整技术分析与变更记录
